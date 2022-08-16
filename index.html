@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="ie=edge">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>XYZ</title>
+<link rel="icon" href="./static/img/favicon.ico">
+<!-- Font Awesome CSS -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" />
+
+<style>
+html, body {
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+}
+body {
+    font-size: 12px;
+    font-family: Arial, Helvetica, sans-serif;
+}
+a {
+    color: #333333;
+    text-decoration: none;
+}
+#app_xyz {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    height: 100%;
+    /* padding: 5px 0 0 0; */
+    /* overflow: hidden; */
+}
+#fs_dataset {
+    width: 220px;
+    margin: 0 10px;
+}
+#fs_plot {
+    width: calc(100% - 240px);
+}
+</style>
+</head>
+
+<body>
+<div id="app_xyz">
+    <fieldset id="fs_dataset">
+        <legend>Dataset</legend>
+    </fieldset>
+    <fieldset id="fs_plot">
+        <legend>Plot</legend>
+        <div id="fig_scatter"></div>
+    </fieldset>
+</div>
+    
+<!-- jQuery first -->
+<script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
+
+<!-- Vue.js -->
+<script src="https://cdn.jsdelivr.net/npm/vue@2.6.11"></script>
+
+<!-- math.js for calcuation -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.0.1/math.min.js"></script>
+
+<!-- export xlsx -->
+<script src="https://unpkg.com/xlsx@0.17.4/dist/shim.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.mini.min.js"></script>
+
+<!-- d3 for data visualization -->
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+
+<!-- plotly -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/1.33.1/plotly.min.js"></script>
+
+<script>
+
+var app_xyz = {
+    vpp: null,
+    vpp_id: '#app_xyz',
+
+    plot: null,
+    plot_id: 'fig_scatter',
+    
+    // for plot.ly
+    width: 1000,
+    height: 400,
+
+    scale_size: d3.scaleLinear()
+        .domain([0, 50])
+        .range([1, 15]),
+    
+    size: {
+        default: 5,
+        selected: 10
+    },
+    color: {
+        default: 'dodgerblue',
+        selected: 'firebrick'
+    },
+
+    data: {
+        ps: [],
+        cols: [],
+        col_dict: {},
+        selected: {
+            x: '',
+            y: '',
+            s: ''
+        }
+    },
+    selected_points: {},
+
+    init: function() {
+        this.vpp = new Vue({
+            el: this.vpp_id,
+            data: this.data,
+            methods: {
+                clear_annotations: function() {
+                    vw_scatter.clear_annotations();
+                },
+
+                update_plot: function() {
+                    vw_scatter.update_plot();
+                }
+            }
+        });
+        this.plot = document.getElementById(this.plot_id);        
+    },
+
+    _update_data: function(data) {
+        // update basic
+        for (const key in data) {
+            if (data.hasOwnProperty(key)) {
+                const obj = data[key];
+                this.data[key] = obj;
+            }
+        }
+        // update other
+        for (let i = 0; i < data.cols.length; i++) {
+            const col = data.cols[i];
+            this.data.col_dict[col.sname] = col;
+        }
+        this.data.selected.x = this.data.cols[0].sname;
+        this.data.selected.y = this.data.cols[1].sname;
+        this.data.selected.s = this.data.cols[2].sname;
+    },
+
+    update_plot: function() {
+        this._plot();
+        this._bind_event();
+    },
+
+    draw: function(new_data) {
+        // update data
+        this._update_data(new_data);
+        this._plot();
+        this._bind_event();
+    },
+
+    _bind_event: function() {
+        this.plot.on('plotly_click', this.on_selected);
+        this.plot.on('plotly_selected', this.on_selected);
+    },
+
+    _plot: function() {
+        // make the plot data
+        this.plot_data = [{
+            x: this.data.ps.map(p=>p[this.data.selected.x]),
+            y: this.data.ps.map(p=>p[this.data.selected.y]),
+            text: this.data.ps.map(function(p) {
+                var t = '<b>MCN: ' + p.mcn + '</b><br>';
+                for (let i = 0; i < vw_scatter.data.cols.length; i++) {
+                    const col = vw_scatter.data.cols[i];
+                    t += col.name + ': <b>' + p[col.sname].toFixed(2) + '</b><br>';
+                }
+                return t;
+            }),
+            hovertemplate: "%{text}",
+            mode: 'markers',
+            type: 'scatter',
+            name: 'Patient',
+            marker: {
+                size: this.data.ps.map(p=>this.scale_size(p[this.data.selected.s])),
+                color: this.data.ps.map(p=>this.color.default)
+            }
+        }];
+        
+        this.plot_layout = {
+            margin: { t: 5, b: 30, l: 50, r: 30},
+            hovermode: 'closest',
+            width: this.width,
+            height: this.height,
+            annotations: [],
+            xaxis: {
+                title: this.data.col_dict[this.data.selected.x].name
+            },
+            yaxis: {
+                title: this.data.col_dict[this.data.selected.y].name
+            }
+        }
+
+        // mark the selected
+        // for (const mcn in this.selected_points) {
+        //     if (this.selected_points.hasOwnProperty(mcn)) {
+        //         const sp = this.selected_points[mcn];
+        //         // update size
+        //         this.plot_data[0].marker.size[sp.pn] = this.size.selected;
+        //         // update color
+        //         this.plot_data[0].marker.color[sp.pn] = this.color.selected;
+        //         // update text
+        //         this.plot_layout.annotations.push({
+        //             x: this.plot_data[0].x[sp.pn],
+        //             y: this.plot_data[0].y[sp.pn],
+        //             showarrow: true,
+        //             arrowhead: 2,
+        //             arrowwidth: 1,
+        //             text: sp.mcn,
+        //             font: { size: 9 }
+        //         });
+        //     }
+        // }
+        Plotly.newPlot(this.plot_id, this.plot_data, this.plot_layout);
+    },
+
+    clear: function() {
+        this.data.ps = [];
+        this.selected_points = {};
+    },
+
+    clear_annotations: function() {
+        this.selected_points = {};
+        this._plot();
+        this._bind_event();
+    },
+
+    on_selected: function(data) {
+        if (typeof(data) == 'undefined') return;
+        var mcns = [];
+        var colors = data.points[0].data.marker.color;
+        var sizes = data.points[0].data.marker.size;
+        var annos = [];
+
+        // prepare update data
+        for (let i = 0; i < data.points.length; i++) {
+            const pt = data.points[i];
+            var pn = pt.pointNumber;
+            var mcn = vw_scatter.data.ps[pn].mcn;
+
+            if (vw_scatter.selected_points.hasOwnProperty(mcn)) { continue; }
+            vw_scatter.selected_points[mcn] = {
+                mcn: mcn, pn: pn
+            };
+
+            mcns.push(mcn);
+
+            // update color and size
+            colors[pn] = vw_scatter.color.selected;
+            sizes[pn] = vw_scatter.size.selected;
+
+            // update anno
+            var anno = {
+                x: data.points[i].data.x[pn],
+                y: data.points[i].data.y[pn],
+                showarrow: true,
+                arrowhead: 2,
+                arrowwidth: 1,
+                text: mcn,
+                font: { size: 9 }
+            }
+            annos.push(anno);
+        }
+
+        // update styles
+        var style_update = {
+            marker: {
+                color: colors,
+                size: sizes
+            }
+        };
+        Plotly.restyle(vw_scatter.plot_id, style_update, [data.points[0].curveNumber]);
+
+        // update annotations
+        var text_update = { 
+            annotations: vw_scatter.plot_layout.annotations.concat(annos) 
+        };
+        Plotly.relayout(vw_scatter.plot_id, text_update);
+
+        // update time line
+        var ps = ds_loader.get_patients(mcns);
+        vw_timeline.add_pts(ps);
+
+        // msg?
+        jarvis.amsg('selected ' + mcns.join(', '));
+        if (mcns.length > 1) {
+            jarvis.amsg('selected ' + mcns.length + ' points');
+        }
+    }
+};
+
+var jarvis = {
+    init: function() {
+
+    }
+};
+$(document).ready(function() {
+    jarvis.init();
+});
+</script>
+</body>
+</html>
